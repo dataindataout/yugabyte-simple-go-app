@@ -17,11 +17,13 @@
 package main
 
 import (
-	"database/sql"
+	"context"
+	"errors"
 	"fmt"
 	"log"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -31,37 +33,18 @@ const (
 	dbUser      = "yugabyte"
 	dbPassword  = "yugabyte"
 	sslMode     = "disable"
-	sslRootCert = ""
+	sslRootCert = "/tmp/asdf"
 )
 
-func main() {
-	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
-		host, port, dbUser, dbPassword, dbName)
-
-	if sslMode != "" {
-		psqlInfo += fmt.Sprintf(" sslmode=%s", sslMode)
-
-		if sslRootCert != "" {
-			psqlInfo += fmt.Sprintf(" sslrootcert=%s", sslRootCert)
-		}
+func checkIfError(err error) {
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	db, err := sql.Open("postgres", psqlInfo)
-	checkIfError(err)
-
-	defer db.Close()
-
-	fmt.Println(">>>> Successfully connected to YugabyteDB!")
-
-	createDatabase(db)
-	selectAccounts(db)
-	transferMoneyBetweenAccount(db, 800)
-	selectAccounts(db)
 }
 
-func createDatabase(db *sql.DB) {
+func createDatabase(conn *pgx.Conn) {
 	stmt := `DROP TABLE IF EXISTS DemoAccount`
-	_, err := db.Exec(stmt)
+	_, err := conn.Exec(context.Background(), stmt)
 	checkIfError(err)
 
 	stmt = `CREATE TABLE DemoAccount (
@@ -71,23 +54,23 @@ func createDatabase(db *sql.DB) {
                         country varchar,
                         balance int)`
 
-	_, err = db.Exec(stmt)
+	_, err = conn.Exec(context.Background(), stmt)
 	checkIfError(err)
 
 	stmt = `INSERT INTO DemoAccount VALUES
                 (1, 'Jessica', 28, 'USA', 10000),
                 (2, 'John', 28, 'Canada', 9000)`
 
-	_, err = db.Exec(stmt)
+	_, err = conn.Exec(context.Background(), stmt)
 	checkIfError(err)
 
 	fmt.Println(">>>> Successfully created table DemoAccount.")
 }
 
-func selectAccounts(db *sql.DB) {
+func selectAccounts(conn *pgx.Conn) {
 	fmt.Println(">>>> Selecting accounts:")
 
-	rows, err := db.Query("SELECT name, age, country, balance FROM DemoAccount")
+	rows, err := conn.Query(context.Background(), "SELECT name, age, country, balance FROM DemoAccount")
 	checkIfError(err)
 
 	defer rows.Close()
@@ -104,20 +87,23 @@ func selectAccounts(db *sql.DB) {
 	}
 }
 
-func transferMoneyBetweenAccount(db *sql.DB, amount int) {
-	tx, err := db.Begin()
+func transferMoneyBetweenAccount(conn *pgx.Conn, amount int) {
+
+	tx, err := conn.Begin(context.Background())
 	checkIfError(err)
 
-	_, err = tx.Exec(`UPDATE DemoAccount SET balance = balance - $1 WHERE name = 'Jessica'`, amount)
+	defer tx.Rollback(context.Background())
+
+	_, err = tx.Exec(context.Background(), `UPDATE DemoAccount SET balance = balance - $1 WHERE name = 'Jessica'`, amount)
 	if checkIfTxAborted(err) {
 		return
 	}
-	_, err = tx.Exec(`UPDATE DemoAccount SET balance = balance + $1 WHERE name = 'John'`, amount)
+	_, err = tx.Exec(context.Background(), `UPDATE DemoAccount SET balance = balance + $1 WHERE name = 'John'`, amount)
 	if checkIfTxAborted(err) {
 		return
 	}
 
-	err = tx.Commit()
+	err = tx.Commit(context.Background())
 	if checkIfTxAborted(err) {
 		return
 	}
@@ -125,27 +111,46 @@ func transferMoneyBetweenAccount(db *sql.DB, amount int) {
 	fmt.Printf(">>>> Transferred %v between accounts.\n", amount)
 }
 
-func checkIfError(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func checkIfTxAborted(err error) bool {
+
 	if err != nil {
-		pqErr := err.(*pq.Error)
-
-		// Applies to logic of the transferMoneyBetweenAccounts method
-		if pqErr.Code == `40001` {
-			fmt.Println(
-				`The operation is aborted due to a concurrent transaction that is modifying the same set of rows.
-                 Consider adding retry logic or using the pessimistic locking.`)
-			return true
-
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			fmt.Println(pgErr.Message) // => syntax error at end of input
+			fmt.Println(pgErr.Code)    // => 42601
+			if pgErr.Code == `40001` {
+				fmt.Println(
+					`The operation is aborted due to a concurrent transaction that is modifying the same set of rows.
+				Consider adding retry logic or using pessimistic locking.`)
+			}
 		}
 
 		log.Fatal(err)
 	}
 
 	return false
+}
+
+func main() {
+	url := fmt.Sprintf("postgres://%s:%s@%s:%d/%s",
+		dbUser, dbPassword, host, port, dbName)
+
+	if sslMode != "" {
+		url += fmt.Sprintf("?sslmode=%s", sslMode)
+
+		if sslRootCert != "" {
+			url += fmt.Sprintf("&sslrootcert=%s", sslRootCert)
+		}
+	}
+
+	conn, err := pgx.Connect(context.Background(), url)
+	checkIfError(err)
+	defer conn.Close(context.Background())
+
+	fmt.Println(">>>> Successfully connected to YugabyteDB!")
+
+	createDatabase(conn)
+	selectAccounts(conn)
+	transferMoneyBetweenAccount(conn, 800)
+	selectAccounts(conn)
 }
