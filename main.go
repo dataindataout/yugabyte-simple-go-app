@@ -27,13 +27,15 @@ import (
 )
 
 const (
-	host        = "127.0.0.1"
+	host1       = "127.0.0.1"
+	host2       = "127.0.0.2" //blank this out if using a single-node cluster
+	host3       = "127.0.0.3" //blank this out if using a single-node cluster
 	port        = 5433
 	dbName      = "yugabyte"
 	dbUser      = "yugabyte"
 	dbPassword  = "yugabyte"
 	sslMode     = "disable"
-	sslRootCert = "/tmp/asdf"
+	sslRootCert = ""
 )
 
 func checkIfError(err error) {
@@ -132,8 +134,18 @@ func checkIfTxAborted(err error) bool {
 }
 
 func main() {
-	url := fmt.Sprintf("postgres://%s:%s@%s:%d/%s",
-		dbUser, dbPassword, host, port, dbName)
+	url := fmt.Sprintf("postgres://%s:%s@%s:%d",
+		dbUser, dbPassword, host1, port)
+
+	if host2 != "" {
+		url += fmt.Sprintf(",%s:%d", host2, port)
+	}
+
+	if host3 != "" {
+		url += fmt.Sprintf(",%s:%d", host3, port)
+	}
+
+	url += fmt.Sprintf("/%s", dbName)
 
 	if sslMode != "" {
 		url += fmt.Sprintf("?sslmode=%s", sslMode)
@@ -142,6 +154,8 @@ func main() {
 			url += fmt.Sprintf("&sslrootcert=%s", sslRootCert)
 		}
 	}
+
+	fmt.Println(url)
 
 	conn, err := pgx.Connect(context.Background(), url)
 	checkIfError(err)

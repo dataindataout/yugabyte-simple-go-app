@@ -2,8 +2,7 @@
 
 The application connects to your YugabyteDB instance via
 [Go PostgreSQL driver pgx](https://docs.yugabyte.com/preview/reference/drivers/go/pgx-reference/) and performs basic SQL
-operations. The instructions below are provided for local deployments [Yugabyte Docs](https://docs.yugabyte.com/preview/quick-start/).
-If you use a different type of deployment, then update the `sample-app.go` file with proper connection parameters.
+operations. The instructions below are provided for local deployments [Yugabyte Docs for single node](https://docs.yugabyte.com/preview/quick-start/) or [Yugabyte Docs for local multi-node](https://docs.yugabyte.com/preview/explore/multi-region-deployments/synchronous-replication-ysql/#create-a-multi-zone-cluster-in-us-west). If you use a different type of deployment, then update the `sample-app.go` file with proper connection parameters.
 
 This example was adapted from the [pq example](https://github.com/YugabyteDB-Samples/yugabyte-simple-go-app).
 
